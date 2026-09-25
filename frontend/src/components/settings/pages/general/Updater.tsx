@@ -125,7 +125,9 @@ export default function UpdaterSettings() {
         onOptionsButton={versionInfo?.all ? showPatchNotes : undefined}
         label={t('Updater.updates.label')}
         description={
-          checkingForUpdates || versionInfo?.remote?.tag_name != versionInfo?.current || !versionInfo?.remote ? (
+          versionInfo?.managed_externally ? (
+            <span>Updates are managed in DroidDeck's Steam session settings.</span>
+          ) : checkingForUpdates || versionInfo?.remote?.tag_name != versionInfo?.current || !versionInfo?.remote ? (
             ''
           ) : (
             <span>{t('Updater.updates.lat_version', { ver: versionInfo?.current })} </span>
@@ -139,7 +141,7 @@ export default function UpdaterSettings() {
         }
         childrenContainerWidth={'fixed'}
       >
-        {updateProgress == -1 && !isLoaderUpdating ? (
+        {versionInfo?.managed_externally ? null : updateProgress == -1 && !isLoaderUpdating ? (
           <DialogButton
             disabled={!versionInfo?.updatable || checkingForUpdates}
             onClick={
