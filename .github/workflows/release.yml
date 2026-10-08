@@ -3,6 +3,10 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      preview_tag:
+        type: string
+        description: Optional DroidDeck Preview tag (droiddeck-arm64-preview.N)
+        default: ''
       release:
         type: choice
         description: Release the asset
@@ -51,7 +55,17 @@ jobs:
 
     - name: Prepare tag ⚙️
       id: ready_tag
+      env:
+        PREVIEW_TAG: ${{ inputs.preview_tag }}
       run: |
+        if [[ -n "$PREVIEW_TAG" ]]; then
+          if [[ "${{ inputs.release }}" != "prerelease" || ! "$PREVIEW_TAG" =~ ^droiddeck-arm64-preview\.[1-9][0-9]*$ ]]; then
+            echo "DroidDeck Preview tags require prerelease and the format droiddeck-arm64-preview.N"
+            exit 1
+          fi
+          echo "tag_name=$PREVIEW_TAG" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
         export VERSION=${{ steps.latest_release.outputs.release }}
         echo "VERS: $VERSION"
         if [[ ${{github.event.inputs.release}} == "release" ]]; then
@@ -153,6 +167,8 @@ jobs:
         run: |
           mv ./artifacts/x86_64/PluginLoader ./PluginLoader
           mv ./artifacts/arm64/PluginLoader ./PluginLoader-arm64
+          sha256sum PluginLoader > PluginLoader.sha256
+          sha256sum PluginLoader-arm64 > PluginLoader-arm64.sha256
 
       - name: Pre-release 📦
         if: github.event.inputs.release == 'prerelease'
@@ -163,6 +179,8 @@ jobs:
           files: |
             ./PluginLoader
             ./PluginLoader-arm64
+            ./PluginLoader.sha256
+            ./PluginLoader-arm64.sha256
           prerelease: true
           generate_release_notes: true
       - name: Release 📦
@@ -174,5 +192,7 @@ jobs:
           files: |
             ./PluginLoader
             ./PluginLoader-arm64
+            ./PluginLoader.sha256
+            ./PluginLoader-arm64.sha256
           prerelease: false
           generate_release_notes: true
