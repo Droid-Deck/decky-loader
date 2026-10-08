@@ -21,6 +21,7 @@ export interface VerInfo {
   remote: RemoteVerInfo | null;
   all: RemoteVerInfo[] | null;
   updatable: boolean;
+  managed_externally: boolean;
 }
 
 export const doUpdate = DeckyBackend.callable('updater/do_update');

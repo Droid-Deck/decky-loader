@@ -6,7 +6,7 @@ from os import getcwd, path, remove
 from typing import TYPE_CHECKING, List, TypedDict
 if TYPE_CHECKING:
     from .main import PluginManager
-from .localplatform.localplatform import chmod, service_restart, service_stop, ON_LINUX, ON_WINDOWS, get_keep_systemd_service, get_selinux
+from .localplatform.localplatform import chmod, service_restart, service_stop, ON_LINUX, ON_WINDOWS, ON_ARM64, get_keep_systemd_service, get_selinux
 import shutil
 from typing import List, TYPE_CHECKING, TypedDict
 import zipfile
@@ -92,15 +92,24 @@ class Updater:
         return str(url)
 
     async def get_version_info(self):
+        managed_externally = ON_LINUX and ON_ARM64
         return {
             "current": self.localVer,
             "remote": self.remoteVer,
-            "all": self.allRemoteVers,
-            "updatable": self.localVer != "unknown" and self.localVer != "dev"
+            "all": None if managed_externally else self.allRemoteVers,
+            "updatable": self.localVer != "unknown" and self.localVer != "dev" and not managed_externally,
+            "managed_externally": managed_externally,
         }
 
     async def check_for_updates(self):
         logger.debug("checking for updates")
+        # DroidDeck installs and updates the ARM64 binary from its compatible release
+        # assets. The upstream updater only knows the regular Linux binary and could
+        # replace the working ARM64 loader with an incompatible executable.
+        if ON_LINUX and ON_ARM64:
+            self.remoteVer = None
+            self.allRemoteVers = []
+            return await self.get_version_info()
         selectedBranch = self.get_branch(self.context.settings)
         async with ClientSession() as web:
             async with web.request("GET", "https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases", headers={'X-GitHub-Api-Version': '2022-11-28'}, ssl=helpers.get_ssl_context()) as res:
@@ -138,8 +147,35 @@ class Updater:
                 pass
             await sleep(60 * 60 * 6) # 6 hours
 
+    def get_remote_binary_name(self):
+        """
+            The binaries on GitHub contain an extra part in their name to denote their architecture
+            
+            For example:
+                Windows: PluginLoader.exe
+                Linux (x86_64): PluginLoader
+                Linux (arm64): PluginLoader-arm64
+        """
+        binary_name = "PluginLoader"
+
+        if ON_ARM64 and ON_LINUX:
+            binary_name += "-arm64"
+
+        if ON_WINDOWS:
+            binary_name += ".exe"
+
+        return binary_name
+    
+    def get_local_binary_name(self):
+        binary_name = "PluginLoader"
+
+        if ON_WINDOWS:
+            binary_name += ".exe"
+
+        return binary_name
+
     async def download_decky_binary(self, download_url: str, version: str, is_zip: bool = False, size_in_bytes: int | None = None):
-        download_filename = "PluginLoader" if ON_LINUX else "PluginLoader.exe"
+        download_filename = self.get_local_binary_name()
         download_temp_filename = download_filename + ".new"
 
         if size_in_bytes == None:
@@ -187,6 +223,9 @@ class Updater:
 
     async def do_update(self):
         logger.debug("Starting update.")
+        if ON_LINUX and ON_ARM64:
+            logger.warning("ARM64 Decky updates are managed by DroidDeck.")
+            return
         try:
             assert self.remoteVer
         except AssertionError:
@@ -196,10 +235,10 @@ class Updater:
         version = self.remoteVer["tag_name"]
         download_url = None
         size_in_bytes = None
-        download_filename = "PluginLoader" if ON_LINUX else "PluginLoader.exe"
+        remote_binary_name = self.get_remote_binary_name()
 
         for x in self.remoteVer["assets"]:
-            if x["name"] == download_filename:
+            if x["name"] == remote_binary_name:
                 download_url = x["browser_download_url"]
                 size_in_bytes = x["size"]
                 break
@@ -247,6 +286,8 @@ class Updater:
         await service_stop("plugin_loader")
 
     async def get_testing_versions(self) -> List[TestingVersion]:
+        if ON_LINUX and ON_ARM64:
+            return []
         result: List[TestingVersion] = []
         async with ClientSession() as web:
             async with web.request("GET", "https://api.github.com/repos/SteamDeckHomebrew/decky-loader/pulls", 
@@ -262,6 +303,9 @@ class Updater:
         return result
 
     async def download_testing_version(self, pr_id: int, sha_id: str):
+        if ON_LINUX and ON_ARM64:
+            logger.warning("ARM64 testing builds are managed by DroidDeck.")
+            return
         down_id = ''
         #Get all the associated workflow run for the given sha_id code hash
         async with ClientSession() as web:
@@ -273,7 +317,10 @@ class Updater:
             if ON_WINDOWS and work['name'] == 'Builder Win':
                 down_id=work['id']
                 break
-            elif ON_LINUX and work['name'] == 'Builder':
+            elif ON_LINUX and ON_ARM64 and work['name'] == 'Builder ARM64':
+                down_id=work['id']
+                break
+            elif ON_LINUX and not ON_ARM64 and work['name'] == 'Builder':
                 down_id=work['id']
                 break
         if down_id != '':
